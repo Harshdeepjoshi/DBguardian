@@ -24,6 +24,19 @@ A database backup and point-in-time retrieval application using FastAPI.
 
 See `.env` file for all configurable variables.
 
+### Required for Backup Functionality
+- `BACKUP_ENCRYPTION_KEY`: Base64-encoded key for encrypting backups (generate with `openssl rand -base64 32`)
+- `MINIO_BUCKET_NAME`: Name of the MinIO bucket for storing backups (default: 'backups')
+
+## MinIO Bucket Setup
+
+The application automatically creates the MinIO bucket when the first backup is performed. However, if you want to create it manually:
+
+1. Access MinIO Console at `http://localhost:9003` (or your configured port)
+2. Login with your `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`
+3. Click "Create Bucket" and enter the bucket name (default: 'backups')
+4. The bucket will be created automatically during the first backup if it doesn't exist
+
 ## Volumes
 
 - `postgres_data`: PostgreSQL data

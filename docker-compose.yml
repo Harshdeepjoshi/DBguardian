@@ -9,6 +9,10 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-backups}
+      - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY}
+      - FALLBACK_STORAGE_DIR=/fallback
+      - API_KEY=${API_KEY:-default-key}
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
     depends_on:
@@ -18,7 +22,7 @@ services:
     networks:
       - dbguardian_network
     volumes:
-      - ./app:/app
+      - .:/app
 
   postgres:
     image: postgres:latest
@@ -60,7 +64,7 @@ services:
 
   celery_worker:
     build: .
-    command: celery -A app.celery worker --loglevel=info
+    command: celery -A app.celery_app worker --loglevel=info
     environment:
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -69,6 +73,9 @@ services:
       - MINIO_ENDPOINT=minio:9000
       - MINIO_ACCESS_KEY=${MINIO_ACCESS_KEY}
       - MINIO_SECRET_KEY=${MINIO_SECRET_KEY}
+      - MINIO_BUCKET_NAME=${MINIO_BUCKET_NAME:-backups}
+      - BACKUP_ENCRYPTION_KEY=${BACKUP_ENCRYPTION_KEY}
+      - FALLBACK_STORAGE_DIR=/fallback
     depends_on:
       - redis
       - postgres
@@ -76,11 +83,11 @@ services:
     networks:
       - dbguardian_network
     volumes:
-      - ./app:/app
+      - .:/app
 
   celery_beat:
     build: .
-    command: celery -A app.celery beat --loglevel=info
+    command: celery -A app.celery_app beat --loglevel=info
     environment:
       - CELERY_BROKER_URL=redis://:${REDIS_PASSWORD}@redis:6379/0
       - CELERY_RESULT_BACKEND=redis://:${REDIS_PASSWORD}@redis:6379/0
@@ -90,7 +97,7 @@ services:
     networks:
       - dbguardian_network
     volumes:
-      - ./app:/app
+      - .:/app
 
   pgadmin:
     image: dpage/pgadmin4:latest
