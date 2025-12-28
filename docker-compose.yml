@@ -145,6 +145,27 @@ services:
     networks:
       - dbguardian_network
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    ports:
+      - "${FRONTEND_PORT:-3001}:3000"
+    environment:
+      - VITE_API_URL=http://fastapi:8000
+      - VITE_API_KEY=${API_KEY:-default-key}
+      - VITE_MINIO_UI_URL=http://localhost:9003
+      - VITE_PGADMIN_URL=http://localhost:5050
+      - VITE_GRAFANA_URL=http://localhost:3000
+      - VITE_PROMETHEUS_URL=http://localhost:9090
+    depends_on:
+      - fastapi
+    networks:
+      - dbguardian_network
+    volumes:
+      - ./frontend:/app
+      - /app/node_modules
+
 volumes:
   postgres_data:
   minio_data:
