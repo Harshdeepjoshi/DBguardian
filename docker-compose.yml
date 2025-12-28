@@ -1,6 +1,9 @@
 services:
   fastapi:
-    build: .
+    build:
+      context: .
+      args:
+        POSTGRES_VERSION: ${POSTGRES_VERSION:-17}
     ports:
       - "${FASTAPI_PORT:-8000}:8000"
     environment:
@@ -25,7 +28,7 @@ services:
       - .:/app
 
   postgres:
-    image: postgres:latest
+    image: postgres:${POSTGRES_VERSION:-17}
     environment:
       - POSTGRES_DB=${POSTGRES_DB}
       - POSTGRES_USER=${POSTGRES_USER}

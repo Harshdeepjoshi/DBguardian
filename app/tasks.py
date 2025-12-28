@@ -4,6 +4,9 @@ import tempfile
 import shutil
 from datetime import datetime
 from cryptography.fernet import Fernet
+from cryptography.hazmat.primitives import hashes
+from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+import base64
 from minio import Minio
 from minio.error import S3Error
 import psycopg2
@@ -18,11 +21,30 @@ class BackupError(Exception):
     pass
 
 def get_encryption_key():
-    """Get encryption key from environment"""
+    """Get encryption key from environment - supports both direct key and password-based generation"""
+    # First, try to get a direct Fernet key (backward compatibility)
     key = os.getenv('BACKUP_ENCRYPTION_KEY')
-    if not key:
-        raise BackupError("BACKUP_ENCRYPTION_KEY environment variable not set")
-    return key.encode()
+    if key:
+        return key.encode()
+
+    # If no direct key, try to generate from password/seed
+    password = os.getenv('BACKUP_ENCRYPTION_PASSWORD')
+    if not password:
+        raise BackupError("Either BACKUP_ENCRYPTION_KEY or BACKUP_ENCRYPTION_PASSWORD environment variable must be set")
+
+    # Generate a deterministic Fernet key from the password using PBKDF2
+    salt = b'dbguardian_backup_salt'  # Fixed salt for deterministic key generation
+    kdf = PBKDF2HMAC(
+        algorithm=hashes.SHA256(),
+        length=32,
+        salt=salt,
+        iterations=100000,
+    )
+    key_bytes = kdf.derive(password.encode())
+
+    # Convert to base64-encoded Fernet key format
+    fernet_key = base64.urlsafe_b64encode(key_bytes)
+    return fernet_key
 
 def encrypt_file(file_path: str, key: bytes) -> str:
     """Encrypt a file using Fernet symmetric encryption"""
@@ -157,27 +179,21 @@ def backup_database_task(self, database_name: str = None):
             self.update_state(state='PROGRESS', meta={'message': 'Creating database dump'})
             create_database_backup(database_url, backup_path)
 
-            # Step 2: Encrypt the backup
-            self.update_state(state='PROGRESS', meta={'message': 'Encrypting backup'})
-            key = get_encryption_key()
-            encrypted_path = encrypt_file(backup_path, key)
+            # Step 2: Upload unencrypted backup directly
+            self.update_state(state='PROGRESS', meta={'message': 'Uploading backup to storage'})
+            object_name = f"{db_name}/{backup_name}"
 
-            # Step 3: Try to upload to MinIO/S3
-            self.update_state(state='PROGRESS', meta={'message': 'Uploading to storage'})
-            object_name = f"{db_name}/{backup_name}.enc"
-
-            if upload_to_minio(encrypted_path, object_name):
+            if upload_to_minio(backup_path, object_name):
                 storage_location = f"s3://{object_name}"
                 storage_type = "minio"
             else:
                 # Fallback to local storage
-                local_path = save_to_local(encrypted_path, f"{backup_name}.enc")
+                local_path = save_to_local(backup_path, backup_name)
                 storage_location = local_path
                 storage_type = "local"
 
             # Clean up temporary files
             os.remove(backup_path)
-            os.remove(encrypted_path)
 
         # Record backup metadata in database
         record_backup_metadata(db_name, backup_name, storage_type, storage_location)
@@ -244,56 +260,74 @@ def record_backup_metadata(database_name: str, backup_name: str, storage_type: s
     except Exception as e:
         logger.error(f"Failed to record backup metadata: {str(e)}")
 
-@celery.task
+@get_celery().task
 def list_backups(database_name: str = None):
-    """List available backups"""
+    """List available backups from storage locations"""
+    backups = []
+
+    # Try to list from MinIO/S3 first
     try:
-        database_url = os.getenv('DATABASE_URL')
-        if not database_url:
-            return []
-
-        parsed = urlparse(database_url)
-        conn = psycopg2.connect(
-            host=parsed.hostname,
-            port=parsed.port,
-            user=parsed.username,
-            password=parsed.password,
-            database=parsed.path.lstrip('/')
+        client = Minio(
+            os.getenv('MINIO_ENDPOINT', 'minio:9000'),
+            access_key=os.getenv('MINIO_ACCESS_KEY'),
+            secret_key=os.getenv('MINIO_SECRET_KEY'),
+            secure=False
         )
-        cursor = conn.cursor()
+        bucket_name = os.getenv('MINIO_BUCKET_NAME', 'backups')
 
-        if database_name:
-            cursor.execute("""
-                SELECT id, database_name, backup_name, storage_type, storage_location, created_at, size_bytes, status
-                FROM backups
-                WHERE database_name = %s
-                ORDER BY created_at DESC
-            """, (database_name,))
-        else:
-            cursor.execute("""
-                SELECT id, database_name, backup_name, storage_type, storage_location, created_at, size_bytes, status
-                FROM backups
-                ORDER BY created_at DESC
-            """)
+        prefix = f"{database_name}/" if database_name else ""
+        objects = client.list_objects(bucket_name, prefix=prefix, recursive=True)
 
-        backups = []
-        for row in cursor.fetchall():
-            backups.append({
-                'id': row[0],
-                'database_name': row[1],
-                'backup_name': row[2],
-                'storage_type': row[3],
-                'storage_location': row[4],
-                'created_at': row[5].isoformat() if row[5] else None,
-                'size_bytes': row[6],
-                'status': row[7]
-            })
-
-        cursor.close()
-        conn.close()
-
-        return backups
+        for obj in objects:
+            if obj.object_name.endswith('.dump'):
+                # Parse db_name/backup_name.dump (unencrypted)
+                parts = obj.object_name.split('/')
+                if len(parts) == 2:
+                    db_name, backup_name = parts
+                    if not database_name or db_name == database_name:
+                        backups.append({
+                            'id': hash(obj.object_name),  # Use hash as id
+                            'database_name': db_name,
+                            'backup_name': backup_name,
+                            'storage_type': 'minio',
+                            'storage_location': f"s3://{obj.object_name}",
+                            'created_at': obj.last_modified.isoformat() if obj.last_modified else None,
+                            'size_bytes': obj.size,
+                            'status': 'completed'
+                        })
 
     except Exception as e:
-        logger.error(f"Failed to list backups: {str(e)}")
-        return []
+        logger.warning(f"Failed to list backups from MinIO: {str(e)}")
+
+    # If MinIO failed or no backups found, try local storage
+    if not backups:
+        try:
+            fallback_dir = os.getenv('FALLBACK_STORAGE_DIR', '/fallback')
+            if os.path.exists(fallback_dir):
+                for file in os.listdir(fallback_dir):
+                    if file.endswith('.enc'):
+                        # Parse backup_default_20231001_120000.dump.enc
+                        backup_name = file[:-4]  # remove .enc
+                        if backup_name.startswith('backup_'):
+                            parts = backup_name.split('_')
+                            if len(parts) >= 3:
+                                db_name = parts[1]
+                                if not database_name or db_name == database_name:
+                                    file_path = os.path.join(fallback_dir, file)
+                                    backups.append({
+                                        'id': hash(file),  # Use hash as id
+                                        'database_name': db_name,
+                                        'backup_name': backup_name,
+                                        'storage_type': 'local',
+                                        'storage_location': file_path,
+                                        'created_at': None,  # Can't easily get creation time
+                                        'size_bytes': os.path.getsize(file_path) if os.path.exists(file_path) else None,
+                                        'status': 'completed'
+                                    })
+        except Exception as e:
+            logger.error(f"Failed to list backups from local storage: {str(e)}")
+
+    # Sort by created_at if available, else by backup_name
+    backups.sort(key=lambda x: (x['created_at'] or '9999-99-99', x['backup_name']), reverse=True)
+
+    return backups

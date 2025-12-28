@@ -9,21 +9,30 @@ from datetime import datetime
 import psycopg2
 # Prometheus imports moved to runtime to avoid import-time failures
 
+# Global metrics to avoid duplication
+_request_count = None
+_request_latency = None
+
 def get_prometheus_metrics():
     """Get prometheus metrics at runtime to avoid import-time failures"""
-    try:
-        from prometheus_client import Counter, Histogram
-        REQUEST_COUNT = Counter('request_count', 'App Request Count', ['method', 'endpoint', 'http_status'])
-        REQUEST_LATENCY = Histogram('request_latency_seconds', 'Request latency', ['method', 'endpoint'])
-        return REQUEST_COUNT, REQUEST_LATENCY
-    except ImportError:
-        # Return dummy objects if prometheus is not available
-        class DummyMetric:
-            def labels(self, **kwargs):
-                return self
-            def inc(self):
-                pass
-        return DummyMetric(), DummyMetric()
+    global _request_count, _request_latency
+    if _request_count is None:
+        try:
+            from prometheus_client import Counter, Histogram
+            _request_count = Counter('request_count', 'App Request Count', ['method', 'endpoint', 'http_status'])
+            _request_latency = Histogram('request_latency_seconds', 'Request latency', ['method', 'endpoint'])
+        except ImportError:
+            # Return dummy objects if prometheus is not available
+            class DummyMetric:
+                def labels(self, **kwargs):
+                    return self
+                def inc(self):
+                    pass
+                def observe(self, value):
+                    pass
+            _request_count = DummyMetric()
+            _request_latency = DummyMetric()
+    return _request_count, _request_latency
 
 def seed_database():
     database_url = os.getenv('DATABASE_URL')
@@ -39,7 +48,7 @@ def seed_database():
         database=parsed.path.lstrip('/')
     )
     cursor = conn.cursor()
-    # Create table if not exists
+    # Create test_data table if not exists
     cursor.execute("""
         CREATE TABLE IF NOT EXISTS test_data (
             id SERIAL PRIMARY KEY,
@@ -48,7 +57,20 @@ def seed_database():
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
         )
     """)
-    # Insert random data
+    # Create backups table if not exists
+    cursor.execute("""
+        CREATE TABLE IF NOT EXISTS backups (
+            id SERIAL PRIMARY KEY,
+            database_name VARCHAR(255) NOT NULL,
+            backup_name VARCHAR(255) NOT NULL,
+            storage_type VARCHAR(50) NOT NULL,
+            storage_location TEXT NOT NULL,
+            created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+            size_bytes BIGINT,
+            status VARCHAR(50) DEFAULT 'completed'
+        )
+    """)
+    # Insert random data into test_data
     for _ in range(10):  # Insert 10 random rows
         name = ''.join(random.choices('abcdefghijklmnopqrstuvwxyz', k=10))
         value = random.randint(1, 1000)
@@ -56,7 +78,7 @@ def seed_database():
     conn.commit()
     cursor.close()
     conn.close()
-    print("Database seeded with test data")
+    print("Database seeded with test data and backups table")
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
@@ -124,10 +146,15 @@ async def create_backup(
 ):
     """Trigger a database backup"""
     try:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.info(f"Received backup request for database: {request.database_name}")
         # Import celery task at runtime to avoid import-time failures
         from .tasks import backup_database_task
+        logger.info("About to call backup_database_task.delay")
         # Start the backup task asynchronously
         task = backup_database_task.delay(request.database_name)
+        logger.info(f"Backup task created with ID: {task.id}")
 
         REQUEST_COUNT, _ = get_prometheus_metrics()
         REQUEST_COUNT.labels(method='POST', endpoint='/api/backups', http_status=202).inc()
@@ -139,6 +166,9 @@ async def create_backup(
         )
 
     except Exception as e:
+        import logging
+        logger = logging.getLogger(__name__)
+        logger.error(f"Failed to start backup: {str(e)}", exc_info=True)
         REQUEST_COUNT, _ = get_prometheus_metrics()
         REQUEST_COUNT.labels(method='POST', endpoint='/api/backups', http_status=500).inc()
         raise HTTPException(status_code=500, detail=f"Failed to start backup: {str(e)}")
