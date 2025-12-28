@@ -1,4 +1,5 @@
 import os
+from fastapi import Header
 
 # Global metrics to avoid duplication
 _request_count = None
@@ -25,10 +26,10 @@ def get_prometheus_metrics():
             _request_latency = DummyMetric()
     return _request_count, _request_latency
 
-def verify_api_key(api_key: str = None):
+def verify_api_key(x_api_key: str = Header(None, alias="X-API-Key")):
     """Basic API key authentication - replace with proper auth later"""
     expected_key = os.getenv('API_KEY', 'default-key')
-    if api_key != expected_key:
+    if x_api_key != expected_key:
         from fastapi import HTTPException
         raise HTTPException(status_code=401, detail="Invalid API key")
-    return api_key
+    return x_api_key

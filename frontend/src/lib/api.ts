@@ -6,8 +6,13 @@ import {
   ScheduleListResponse,
   ScheduleRequest,
   BackupRequest,
+  BackupResponse,
   DatabaseInfo,
-  SystemInfo,
+  DatabaseListResponse,
+  TableInfo,
+  TableListResponse,
+  SystemStatus,
+  ConfigInfo,
   TaskStatus
 } from '../types/api'
 
@@ -24,7 +29,7 @@ const api = axios.create({
 
 // Backups API
 export const backupsApi = {
-  createBackup: async (request: BackupRequest): Promise<{ task_id: string }> => {
+  createBackup: async (request: BackupRequest): Promise<BackupResponse> => {
     const response = await api.post('/api/backups', request)
     return response.data
   },
@@ -40,8 +45,9 @@ export const backupsApi = {
     return response.data
   },
 
-  deleteBackup: async (backupId: string): Promise<void> => {
-    await api.delete(`/api/backups/${backupId}`)
+  deleteBackup: async (backupId: number): Promise<{ message: string; backup_name: string }> => {
+    const response = await api.delete(`/api/backups/${backupId}`)
+    return response.data
   },
 }
 
@@ -71,14 +77,15 @@ export const schedulesApi = {
     return response.data
   },
 
-  deleteSchedule: async (scheduleId: number): Promise<void> => {
-    await api.delete(`/api/schedules/${scheduleId}`)
+  deleteSchedule: async (scheduleId: number): Promise<{ message: string; database_name: string }> => {
+    const response = await api.delete(`/api/schedules/${scheduleId}`)
+    return response.data
   },
 }
 
 // Databases API
 export const databasesApi = {
-  listDatabases: async (): Promise<DatabaseInfo[]> => {
+  listDatabases: async (): Promise<DatabaseListResponse> => {
     const response = await api.get('/api/databases')
     return response.data
   },
@@ -87,17 +94,22 @@ export const databasesApi = {
     const response = await api.get(`/api/databases/${databaseName}`)
     return response.data
   },
+
+  listTables: async (databaseName: string): Promise<TableListResponse> => {
+    const response = await api.get(`/api/databases/${databaseName}/tables`)
+    return response.data
+  },
 }
 
 // System API
 export const systemApi = {
-  getSystemInfo: async (): Promise<SystemInfo> => {
-    const response = await api.get('/api/system/info')
+  getSystemStatus: async (): Promise<SystemStatus> => {
+    const response = await api.get('/api/system/status')
     return response.data
   },
 
-  getConfig: async (): Promise<any> => {
-    const response = await api.get('/api/system/config')
+  getConfig: async (): Promise<ConfigInfo> => {
+    const response = await api.get('/api/config')
     return response.data
   },
 }

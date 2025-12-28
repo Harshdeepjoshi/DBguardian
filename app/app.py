@@ -1,4 +1,5 @@
 from fastapi import FastAPI
+from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from .database.connection import init_database
 from .routes import backups_router, schedules_router, database_router, system_router
@@ -14,6 +15,15 @@ app = FastAPI(
     description="Database backup and monitoring system",
     version="1.0.0",
     lifespan=lifespan
+)
+
+# CORS middleware
+app.add_middleware(
+    CORSMiddleware,
+    allow_origins=["http://localhost:3001"],
+    allow_credentials=True,
+    allow_methods=["*"],
+    allow_headers=["*"],
 )
 
 # Mount metrics endpoint at runtime to avoid import-time failures
