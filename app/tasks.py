@@ -3,12 +3,7 @@ import subprocess
 import tempfile
 import shutil
 from datetime import datetime
-from cryptography.fernet import Fernet
-from cryptography.hazmat.primitives import hashes
-from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
 import base64
-from minio import Minio
-from minio.error import S3Error
 import psycopg2
 from urllib.parse import urlparse
 import logging
@@ -20,8 +15,27 @@ logger = logging.getLogger(__name__)
 class BackupError(Exception):
     pass
 
+# Conditional imports
+try:
+    from cryptography.fernet import Fernet
+    from cryptography.hazmat.primitives import hashes
+    from cryptography.hazmat.primitives.kdf.pbkdf2 import PBKDF2HMAC
+    CRYPTOGRAPHY_AVAILABLE = True
+except ImportError:
+    CRYPTOGRAPHY_AVAILABLE = False
+
+try:
+    from minio import Minio
+    from minio.error import S3Error
+    MINIO_AVAILABLE = True
+except ImportError:
+    MINIO_AVAILABLE = False
+
 def get_encryption_key():
     """Get encryption key from environment - supports both direct key and password-based generation"""
+    if not CRYPTOGRAPHY_AVAILABLE:
+        raise BackupError("Cryptography library not available")
+
     # First, try to get a direct Fernet key (backward compatibility)
     key = os.getenv('BACKUP_ENCRYPTION_KEY')
     if key:
@@ -48,6 +62,9 @@ def get_encryption_key():
 
 def encrypt_file(file_path: str, key: bytes) -> str:
     """Encrypt a file using Fernet symmetric encryption"""
+    if not CRYPTOGRAPHY_AVAILABLE:
+        raise BackupError("Cryptography library not available")
+
     fernet = Fernet(key)
 
     with open(file_path, 'rb') as file:
@@ -63,6 +80,9 @@ def encrypt_file(file_path: str, key: bytes) -> str:
 
 def decrypt_file(encrypted_path: str, key: bytes) -> str:
     """Decrypt a file using Fernet symmetric encryption"""
+    if not CRYPTOGRAPHY_AVAILABLE:
+        raise BackupError("Cryptography library not available")
+
     fernet = Fernet(key)
 
     with open(encrypted_path, 'rb') as file:
@@ -78,6 +98,10 @@ def decrypt_file(encrypted_path: str, key: bytes) -> str:
 
 def upload_to_minio(file_path: str, object_name: str) -> bool:
     """Upload file to MinIO/S3"""
+    if not MINIO_AVAILABLE:
+        logger.error("MinIO library not available")
+        return False
+
     try:
         client = Minio(
             os.getenv('MINIO_ENDPOINT', 'minio:9000'),
@@ -159,12 +183,12 @@ def get_celery():
 def backup_database_task(self, schedule_id: int):
     """Celery task to backup database"""
     try:
-        # First, check if the schedule is still enabled
+        # First, check if the schedule is still enabled and get database credentials
         database_url = os.getenv('DATABASE_URL')
         if not database_url:
             raise BackupError("DATABASE_URL not set")
 
-        # Check if schedule exists and is enabled
+        # Check if schedule exists and is enabled, and get database credentials
         parsed = urlparse(database_url)
         conn = psycopg2.connect(
             host=parsed.hostname,
@@ -176,8 +200,10 @@ def backup_database_task(self, schedule_id: int):
         cursor = conn.cursor()
 
         cursor.execute("""
-            SELECT database_name, enabled FROM backup_schedules
-            WHERE id = %s
+            SELECT bs.database_name, bs.enabled, dc.name, dc.host, dc.port, dc.database, dc.username, dc.password, dc.version
+            FROM backup_schedules bs
+            LEFT JOIN database_credentials dc ON bs.database_name = dc.name
+            WHERE bs.id = %s
         """, (schedule_id,))
 
         result = cursor.fetchone()
@@ -190,11 +216,19 @@ def backup_database_task(self, schedule_id: int):
             return {'status': 'skipped', 'reason': 'schedule_disabled'}
 
         database_name = result[0]
+        db_credentials = result[2:]  # (name, host, port, database, username, password, version)
+
+        # Check if we have credentials for this database
+        if not all(db_credentials[:6]):  # Check if all credential fields are present
+            raise BackupError(f"No database credentials found for database: {database_name}")
+
+        # Build database URL from credentials
+        db_url = f"postgresql://{db_credentials[4]}:{db_credentials[5]}@{db_credentials[1]}:{db_credentials[2]}/{db_credentials[3]}"
 
         # Update task state
         self.update_state(state='PROGRESS', meta={'message': 'Starting backup'})
 
-        # Generate backup name
+        # Generate backup name using database name as prefix
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')
         db_name = database_name or 'default'
         backup_name = f"backup_{db_name}_{timestamp}.dump"
@@ -205,7 +239,7 @@ def backup_database_task(self, schedule_id: int):
 
             # Step 1: Create database backup
             self.update_state(state='PROGRESS', meta={'message': 'Creating database dump'})
-            create_database_backup(database_url, backup_path)
+            create_database_backup(db_url, backup_path)
 
             # Step 2: Upload unencrypted backup directly
             self.update_state(state='PROGRESS', meta={'message': 'Uploading backup to storage'})

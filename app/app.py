@@ -2,7 +2,7 @@ from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from .database.connection import init_database
-from .routes import backups_router, schedules_router, database_router, system_router
+from .routes import backups_router, schedules_router, database_router, system_router, credentials_router
 from .dependencies import get_prometheus_metrics
 
 @asynccontextmanager
@@ -39,6 +39,7 @@ app.include_router(backups_router, prefix="/api", tags=["backups"])
 app.include_router(schedules_router, prefix="/api", tags=["schedules"])
 app.include_router(database_router, prefix="/api", tags=["database"])
 app.include_router(system_router, prefix="/api", tags=["system"])
+app.include_router(credentials_router, prefix="/api", tags=["credentials"])
 
 @app.get("/")
 async def root():

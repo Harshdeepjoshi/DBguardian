@@ -9,6 +9,7 @@ const Navbar = () => {
     { path: '/backups', label: 'Backups' },
     { path: '/schedules', label: 'Schedules' },
     { path: '/databases', label: 'Databases' },
+    { path: '/credentials', label: 'Credentials' },
     { path: '/system', label: 'System' },
   ]
 

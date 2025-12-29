@@ -101,6 +101,39 @@ export const databasesApi = {
   },
 }
 
+// Credentials API
+export const credentialsApi = {
+  createCredentials: async (credentials: DatabaseCredentials): Promise<DatabaseCredentials> => {
+    const response = await api.post('/api/credentials', credentials)
+    return response.data
+  },
+
+  listCredentials: async (): Promise<DatabaseCredentialsList> => {
+    const response = await api.get('/api/credentials')
+    return response.data
+  },
+
+  getCredentials: async (credentialId: number): Promise<DatabaseCredentials> => {
+    const response = await api.get(`/api/credentials/${credentialId}`)
+    return response.data
+  },
+
+  updateCredentials: async (credentialId: number, credentials: DatabaseCredentials): Promise<DatabaseCredentials> => {
+    const response = await api.put(`/api/credentials/${credentialId}`, credentials)
+    return response.data
+  },
+
+  deleteCredentials: async (credentialId: number): Promise<{ message: string }> => {
+    const response = await api.delete(`/api/credentials/${credentialId}`)
+    return response.data
+  },
+
+  testConnection: async (credentialId: number): Promise<{ message: string }> => {
+    const response = await api.post(`/api/credentials/${credentialId}/test`)
+    return response.data
+  },
+}
+
 // System API
 export const systemApi = {
   getSystemStatus: async (): Promise<SystemStatus> => {

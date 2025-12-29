@@ -158,6 +158,21 @@ def init_database():
                     )
                 """)
 
+                # Create database_credentials table if not exists
+                cursor.execute("""
+                    CREATE TABLE IF NOT EXISTS database_credentials (
+                        id SERIAL PRIMARY KEY,
+                        name VARCHAR(255) UNIQUE NOT NULL,
+                        host VARCHAR(255) NOT NULL,
+                        port INTEGER DEFAULT 5432,
+                        database VARCHAR(255) NOT NULL,
+                        username VARCHAR(255) NOT NULL,
+                        password TEXT NOT NULL,
+                        version VARCHAR(50),
+                        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+                    )
+                """)
+
                 # Create backup_schedules table if not exists
                 cursor.execute("""
                     CREATE TABLE IF NOT EXISTS backup_schedules (

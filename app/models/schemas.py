@@ -71,6 +71,21 @@ class SystemStatus(BaseModel):
     storage: str
     overall: str
 
+# Database credentials model
+class DatabaseCredentials(BaseModel):
+    id: Optional[int] = None
+    name: str = Field(..., description="Unique name for this database configuration")
+    host: str = Field(..., description="Database host")
+    port: int = Field(5432, description="Database port")
+    database: str = Field(..., description="Database name")
+    username: str = Field(..., description="Database username")
+    password: str = Field(..., description="Database password")
+    version: Optional[str] = Field(None, description="PostgreSQL version")
+    created_at: Optional[str] = None
+
+class DatabaseCredentialsList(BaseModel):
+    databases: List[DatabaseCredentials]
+
 # Configuration model
 class ConfigInfo(BaseModel):
     database_configured: bool
@@ -78,3 +93,4 @@ class ConfigInfo(BaseModel):
     encryption_enabled: bool
     prometheus_enabled: bool
     celery_enabled: bool
+    postgres_version: str

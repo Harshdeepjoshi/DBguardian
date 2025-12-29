@@ -7,6 +7,7 @@ import { Backups } from './pages/Backups'
 import { Schedules } from './pages/Schedules'
 import { Databases } from './pages/Databases'
 import { System } from './pages/System'
+import Credentials from './pages/Credentials'
 
 const queryClient = new QueryClient({
   defaultOptions: {
@@ -29,6 +30,7 @@ function App() {
               <Route path="/backups" element={<Backups />} />
               <Route path="/schedules" element={<Schedules />} />
               <Route path="/databases" element={<Databases />} />
+              <Route path="/credentials" element={<Credentials />} />
               <Route path="/system" element={<System />} />
             </Routes>
           </main>

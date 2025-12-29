@@ -81,6 +81,23 @@ export interface ConfigInfo {
   encryption_enabled: boolean
   prometheus_enabled: boolean
   celery_enabled: boolean
+  postgres_version: string
+}
+
+export interface DatabaseCredentials {
+  id?: number
+  name: string
+  host: string
+  port: number
+  database: string
+  username: string
+  password: string
+  version?: string
+  created_at?: string
+}
+
+export interface DatabaseCredentialsList {
+  databases: DatabaseCredentials[]
 }
 
 export interface TaskStatus {
