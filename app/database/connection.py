@@ -33,8 +33,95 @@ def get_db_connection():
         if conn:
             conn.close()
 
+def check_trigger_exists(cursor, trigger_name):
+    """Check if a trigger exists in the database"""
+    cursor.execute("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_trigger
+            WHERE tgname = %s
+        )
+    """, (trigger_name,))
+    return cursor.fetchone()[0]
+
+def check_function_exists(cursor, function_name):
+    """Check if a function exists in the database"""
+    cursor.execute("""
+        SELECT EXISTS (
+            SELECT 1
+            FROM pg_proc
+            WHERE proname = %s
+        )
+    """, (function_name,))
+    return cursor.fetchone()[0]
+
+def init_database_triggers(cursor):
+    """Initialize database triggers for schedule change notifications"""
+    try:
+        # Check if the notify function exists
+        if not check_function_exists(cursor, 'notify_schedule_change'):
+            # Create the notification function
+            cursor.execute("""
+                CREATE OR REPLACE FUNCTION notify_schedule_change()
+                RETURNS TRIGGER AS $$
+                DECLARE
+                    payload JSON;
+                BEGIN
+                    -- Build notification payload
+                    IF TG_OP = 'INSERT' THEN
+                        payload := json_build_object(
+                            'action', 'inserted',
+                            'schedule_id', NEW.id,
+                            'database_name', NEW.database_name,
+                            'enabled', NEW.enabled
+                        );
+                    ELSIF TG_OP = 'UPDATE' THEN
+                        payload := json_build_object(
+                            'action', 'updated',
+                            'schedule_id', NEW.id,
+                            'database_name', NEW.database_name,
+                            'enabled', NEW.enabled,
+                            'old_enabled', OLD.enabled
+                        );
+                    ELSIF TG_OP = 'DELETE' THEN
+                        payload := json_build_object(
+                            'action', 'deleted',
+                            'schedule_id', OLD.id,
+                            'database_name', OLD.database_name,
+                            'enabled', OLD.enabled
+                        );
+                    END IF;
+
+                    -- Send notification
+                    PERFORM pg_notify('schedule_changes', payload::text);
+
+                    -- Return appropriate value based on operation
+                    IF TG_OP = 'DELETE' THEN
+                        RETURN OLD;
+                    ELSE
+                        RETURN NEW;
+                    END IF;
+                END;
+                $$ LANGUAGE plpgsql;
+            """)
+            print("Created notify_schedule_change function")
+
+        # Check if the trigger exists
+        if not check_trigger_exists(cursor, 'schedule_change_trigger'):
+            # Create the trigger
+            cursor.execute("""
+                CREATE TRIGGER schedule_change_trigger
+                    AFTER INSERT OR UPDATE OR DELETE ON backup_schedules
+                    FOR EACH ROW EXECUTE FUNCTION notify_schedule_change();
+            """)
+            print("Created schedule_change_trigger")
+
+    except Exception as e:
+        print(f"Warning: Failed to initialize database triggers: {str(e)}")
+        # Don't fail the entire initialization if triggers fail
+
 def init_database():
-    """Initialize database tables with retry logic"""
+    """Initialize database tables and triggers with retry logic"""
     import time
     import logging
 
@@ -86,6 +173,9 @@ def init_database():
                     )
                 """)
 
+                # Initialize database triggers
+                init_database_triggers(cursor)
+
                 # Insert random data into test_data (only if table is empty)
                 cursor.execute("SELECT COUNT(*) FROM test_data")
                 if cursor.fetchone()[0] == 0:
@@ -98,7 +188,7 @@ def init_database():
                 conn.commit()
                 cursor.close()
 
-            print("Database seeded with test data and tables")
+            print("Database seeded with test data, tables, and triggers")
             return  # Success, exit the function
 
         except Exception as e:

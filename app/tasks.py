@@ -156,15 +156,43 @@ def get_celery():
     return celery
 
 @get_celery().task(bind=True)
-def backup_database_task(self, database_name: str = None):
+def backup_database_task(self, schedule_id: int):
     """Celery task to backup database"""
     try:
-        # Update task state
-        self.update_state(state='PROGRESS', meta={'message': 'Starting backup'})
-
+        # First, check if the schedule is still enabled
         database_url = os.getenv('DATABASE_URL')
         if not database_url:
             raise BackupError("DATABASE_URL not set")
+
+        # Check if schedule exists and is enabled
+        parsed = urlparse(database_url)
+        conn = psycopg2.connect(
+            host=parsed.hostname,
+            port=parsed.port,
+            user=parsed.username,
+            password=parsed.password,
+            database=parsed.path.lstrip('/')
+        )
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT database_name, enabled FROM backup_schedules
+            WHERE id = %s
+        """, (schedule_id,))
+
+        result = cursor.fetchone()
+        cursor.close()
+        conn.close()
+
+        if not result or not result[1]:  # Not found or not enabled
+            logger.info(f"Schedule {schedule_id} is disabled or deleted, skipping backup")
+            self.update_state(state='SUCCESS', meta={'message': 'Schedule disabled, backup skipped'})
+            return {'status': 'skipped', 'reason': 'schedule_disabled'}
+
+        database_name = result[0]
+
+        # Update task state
+        self.update_state(state='PROGRESS', meta={'message': 'Starting backup'})
 
         # Generate backup name
         timestamp = datetime.now().strftime('%Y%m%d_%H%M%S')

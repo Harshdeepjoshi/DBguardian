@@ -1,8 +1,10 @@
 from fastapi import APIRouter, HTTPException, Depends
 import os
+import logging
 from ..models.schemas import SystemStatus, ConfigInfo
 from ..database.connection import get_db_connection
 from ..dependencies import verify_api_key, get_prometheus_metrics
+from ..scheduler import refresh_scheduler
 
 router = APIRouter()
 
@@ -68,3 +70,30 @@ async def get_config(api_key: str = Depends(verify_api_key)):
     REQUEST_COUNT.labels(method='GET', endpoint='/api/config', http_status=200).inc()
 
     return config
+
+@router.post("/system/scheduler/reset")
+async def reset_scheduler(api_key: str = Depends(verify_api_key)):
+    """Reset the Celery Beat scheduler state"""
+    try:
+        logger = logging.getLogger(__name__)
+        logger.info("Manually resetting scheduler state...")
+
+        # Attempt to refresh the scheduler
+        success = refresh_scheduler()
+
+        if success:
+            message = "Scheduler reset successfully"
+            status_code = 200
+        else:
+            message = "Scheduler reset failed, but continuing with degraded mode"
+            status_code = 207  # Partial success
+
+        REQUEST_COUNT, _ = get_prometheus_metrics()
+        REQUEST_COUNT.labels(method='POST', endpoint='/api/system/scheduler/reset', http_status=status_code).inc()
+
+        return {"message": message, "success": success}
+
+    except Exception as e:
+        REQUEST_COUNT, _ = get_prometheus_metrics()
+        REQUEST_COUNT.labels(method='POST', endpoint='/api/system/scheduler/reset', http_status=500).inc()
+        raise HTTPException(status_code=500, detail=f"Failed to reset scheduler: {str(e)}")

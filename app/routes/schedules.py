@@ -3,6 +3,7 @@ from typing import Optional
 from ..models.schemas import ScheduleRequest, ScheduleInfo, ScheduleListResponse
 from ..database.connection import get_db_connection
 from ..dependencies import verify_api_key, get_prometheus_metrics
+from ..scheduler import refresh_scheduler
 
 router = APIRouter()
 
@@ -46,6 +47,13 @@ async def create_schedule(request: ScheduleRequest, api_key: str = Depends(verif
             last_run=str(result[7]) if result[7] else None,
             next_run=str(result[8]) if result[8] else None
         )
+
+        # Refresh scheduler configuration after creating a schedule
+        try:
+            refresh_scheduler()
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Warning: Failed to refresh scheduler: {e}")
 
         REQUEST_COUNT, _ = get_prometheus_metrics()
         REQUEST_COUNT.labels(method='POST', endpoint='/api/schedules', http_status=201).inc()
@@ -205,6 +213,13 @@ async def update_schedule(
             next_run=str(result[8]) if result[8] else None
         )
 
+        # Refresh scheduler configuration after updating a schedule
+        try:
+            refresh_scheduler()
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Warning: Failed to refresh scheduler: {e}")
+
         REQUEST_COUNT, _ = get_prometheus_metrics()
         REQUEST_COUNT.labels(method='PUT', endpoint=f'/api/schedules/{schedule_id}', http_status=200).inc()
 
@@ -235,6 +250,13 @@ async def delete_schedule(schedule_id: int, api_key: str = Depends(verify_api_ke
             cursor.execute("DELETE FROM backup_schedules WHERE id = %s", (schedule_id,))
             conn.commit()
 
+        # Refresh scheduler configuration after deleting a schedule
+        try:
+            refresh_scheduler()
+        except Exception as e:
+            # Log error but don't fail the request
+            print(f"Warning: Failed to refresh scheduler: {e}")
+
         REQUEST_COUNT, _ = get_prometheus_metrics()
         REQUEST_COUNT.labels(method='DELETE', endpoint=f'/api/schedules/{schedule_id}', http_status=200).inc()
 
@@ -246,3 +268,49 @@ async def delete_schedule(schedule_id: int, api_key: str = Depends(verify_api_ke
         REQUEST_COUNT, _ = get_prometheus_metrics()
         REQUEST_COUNT.labels(method='DELETE', endpoint=f'/api/schedules/{schedule_id}', http_status=500).inc()
         raise HTTPException(status_code=500, detail=f"Failed to delete schedule: {str(e)}")
+
+@router.post("/schedules/{schedule_id}/trigger")
+async def trigger_schedule(schedule_id: int, api_key: str = Depends(verify_api_key)):
+    """Manually trigger a backup schedule"""
+    try:
+        from ..scheduler import trigger_backup_for_schedule
+
+        task_id = trigger_backup_for_schedule(schedule_id)
+
+        if task_id:
+            REQUEST_COUNT, _ = get_prometheus_metrics()
+            REQUEST_COUNT.labels(method='POST', endpoint=f'/api/schedules/{schedule_id}/trigger', http_status=200).inc()
+
+            return {"message": f"Schedule {schedule_id} triggered", "task_id": task_id}
+        else:
+            raise HTTPException(status_code=404, detail="Schedule not found or not enabled")
+
+    except HTTPException:
+        raise
+    except Exception as e:
+        REQUEST_COUNT, _ = get_prometheus_metrics()
+        REQUEST_COUNT.labels(method='POST', endpoint=f'/api/schedules/{schedule_id}/trigger', http_status=500).inc()
+        raise HTTPException(status_code=500, detail=f"Failed to trigger schedule: {str(e)}")
+
+@router.post("/schedules/refresh")
+async def refresh_schedules(api_key: str = Depends(verify_api_key)):
+    """Refresh the Celery Beat scheduler with current database schedules"""
+    try:
+        success = refresh_scheduler()
+
+        if success:
+            message = "Scheduler refreshed successfully"
+            status_code = 200
+        else:
+            message = "Scheduler refresh failed"
+            status_code = 500
+
+        REQUEST_COUNT, _ = get_prometheus_metrics()
+        REQUEST_COUNT.labels(method='POST', endpoint='/api/schedules/refresh', http_status=status_code).inc()
+
+        return {"message": message, "success": success}
+
+    except Exception as e:
+        REQUEST_COUNT, _ = get_prometheus_metrics()
+        REQUEST_COUNT.labels(method='POST', endpoint='/api/schedules/refresh', http_status=500).inc()
+        raise HTTPException(status_code=500, detail=f"Failed to refresh scheduler: {str(e)}")
