@@ -1,9 +1,25 @@
+import logging
+import sys
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from contextlib import asynccontextmanager
 from .database.connection import init_database
 from .routes import backups_router, schedules_router, database_router, system_router, credentials_router
 from .dependencies import get_prometheus_metrics
+
+# Configure logging for Docker
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout)
+    ]
+)
+
+# Set specific loggers to INFO level
+logging.getLogger('app.routes.backups').setLevel(logging.INFO)
+logging.getLogger('uvicorn').setLevel(logging.INFO)
+logging.getLogger('uvicorn.access').setLevel(logging.INFO)
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):

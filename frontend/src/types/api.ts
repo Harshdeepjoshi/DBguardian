@@ -10,6 +10,7 @@ export interface BackupResponse {
 
 export interface BackupInfo {
   id: number
+  filename: string
   database_name: string
   backup_name: string
   storage_type: string

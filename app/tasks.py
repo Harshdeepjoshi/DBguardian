@@ -246,7 +246,8 @@ def backup_database_task(self, schedule_id: int):
             object_name = f"{db_name}/{backup_name}"
 
             if upload_to_minio(backup_path, object_name):
-                storage_location = f"s3://{object_name}"
+                bucket_name = os.getenv('MINIO_BUCKET_NAME', 'backups')
+                storage_location = f"s3://{bucket_name}/{object_name}"
                 storage_type = "minio"
             else:
                 # Fallback to local storage
@@ -326,6 +327,7 @@ def record_backup_metadata(database_name: str, backup_name: str, storage_type: s
 def list_backups(database_name: str = None):
     """List available backups from storage locations"""
     backups = []
+    id_counter = 1
 
     # Try to list from MinIO/S3 first
     try:
@@ -348,7 +350,8 @@ def list_backups(database_name: str = None):
                     db_name, backup_name = parts
                     if not database_name or db_name == database_name:
                         backups.append({
-                            'id': hash(obj.object_name),  # Use hash as id
+                            'id': id_counter,
+                            'filename': obj.object_name,  # Unique identifier for deletion
                             'database_name': db_name,
                             'backup_name': backup_name,
                             'storage_type': 'minio',
@@ -357,37 +360,39 @@ def list_backups(database_name: str = None):
                             'size_bytes': obj.size,
                             'status': 'completed'
                         })
+                        id_counter += 1
 
     except Exception as e:
         logger.warning(f"Failed to list backups from MinIO: {str(e)}")
 
-    # If MinIO failed or no backups found, try local storage
-    if not backups:
-        try:
-            fallback_dir = os.getenv('FALLBACK_STORAGE_DIR', '/fallback')
-            if os.path.exists(fallback_dir):
-                for file in os.listdir(fallback_dir):
-                    if file.endswith('.enc'):
-                        # Parse backup_default_20231001_120000.dump.enc
-                        backup_name = file[:-4]  # remove .enc
-                        if backup_name.startswith('backup_'):
-                            parts = backup_name.split('_')
-                            if len(parts) >= 3:
-                                db_name = parts[1]
-                                if not database_name or db_name == database_name:
-                                    file_path = os.path.join(fallback_dir, file)
-                                    backups.append({
-                                        'id': hash(file),  # Use hash as id
-                                        'database_name': db_name,
-                                        'backup_name': backup_name,
-                                        'storage_type': 'local',
-                                        'storage_location': file_path,
-                                        'created_at': None,  # Can't easily get creation time
-                                        'size_bytes': os.path.getsize(file_path) if os.path.exists(file_path) else None,
-                                        'status': 'completed'
-                                    })
-        except Exception as e:
-            logger.error(f"Failed to list backups from local storage: {str(e)}")
+    # Also try local storage (always check both)
+    try:
+        fallback_dir = os.getenv('FALLBACK_STORAGE_DIR', '/fallback')
+        if os.path.exists(fallback_dir):
+            for file in os.listdir(fallback_dir):
+                if file.endswith('.enc'):
+                    # Parse backup_default_20231001_120000.dump.enc
+                    backup_name = file[:-4]  # remove .enc
+                    if backup_name.startswith('backup_'):
+                        parts = backup_name.split('_')
+                        if len(parts) >= 3:
+                            db_name = parts[1]
+                            if not database_name or db_name == database_name:
+                                file_path = os.path.join(fallback_dir, file)
+                                backups.append({
+                                    'id': id_counter,
+                                    'filename': file,  # Unique identifier for deletion
+                                    'database_name': db_name,
+                                    'backup_name': backup_name,
+                                    'storage_type': 'local',
+                                    'storage_location': file_path,
+                                    'created_at': None,  # Can't easily get creation time
+                                    'size_bytes': os.path.getsize(file_path) if os.path.exists(file_path) else None,
+                                    'status': 'completed'
+                                })
+                                id_counter += 1
+    except Exception as e:
+        logger.error(f"Failed to list backups from local storage: {str(e)}")
 
     # Sort by created_at if available, else by backup_name
     backups.sort(key=lambda x: (x['created_at'] or '9999-99-99', x['backup_name']), reverse=True)

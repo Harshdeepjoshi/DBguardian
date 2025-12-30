@@ -13,6 +13,7 @@ class BackupResponse(BaseModel):
 
 class BackupInfo(BaseModel):
     id: int
+    filename: str  # Unique identifier for deletion (object_name for MinIO, filename for local)
     database_name: str
     backup_name: str
     storage_type: str

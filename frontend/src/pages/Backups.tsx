@@ -90,11 +90,11 @@ const Backups = () => {
     poll()
   }
 
-  const handleDeleteBackup = async (backupId: number) => {
+  const handleDeleteBackup = async (backup: BackupInfo) => {
     if (!confirm('Are you sure you want to delete this backup?')) return
 
     try {
-      await backupsApi.deleteBackup(backupId)
+      await backupsApi.deleteBackup(backup.filename)
       toast({
         title: 'Success',
         description: 'Backup deleted successfully',
@@ -196,7 +196,7 @@ const Backups = () => {
                   <Button
                     variant="destructive"
                     size="sm"
-                    onClick={() => handleDeleteBackup(backup.id)}
+                    onClick={() => handleDeleteBackup(backup)}
                   >
                     Delete
                   </Button>

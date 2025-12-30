@@ -45,8 +45,9 @@ export const backupsApi = {
     return response.data
   },
 
-  deleteBackup: async (backupId: number): Promise<{ message: string; backup_name: string }> => {
-    const response = await api.delete(`/api/backups/${backupId}`)
+  deleteBackup: async (filename: string): Promise<{ message: string; backup_name: string }> => {
+    const encodedFilename = encodeURIComponent(filename)
+    const response = await api.delete(`/api/backups/${encodedFilename}`)
     return response.data
   },
 }
