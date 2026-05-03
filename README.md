@@ -1,52 +1,58 @@
-# DB Guardian
+# DBGuardian
 
-A database backup and point-in-time retrieval application using FastAPI.
+## Overview
+DBGuardian is a backend system for automated database backup and point-in-time recovery, designed to improve reliability and reduce the risk of data loss in production environments.
 
-## Services
+## Problem
+In many backend systems, database backups are either manual or poorly automated, making recovery unreliable and increasing the risk of data loss during failures.
 
-- **FastAPI**: Main application
-- **PostgreSQL**: Database
-- **MinIO**: S3-compatible storage
-- **Redis**: Caching and message broker
-- **Celery Worker**: Background task processing
-- **Celery Beat**: Scheduled tasks
-- **pgAdmin**: Database administration
-- **Prometheus**: Monitoring
-- **Grafana**: Dashboards
+## Solution
+DBGuardian automates the entire backup lifecycle by:
+- Scheduling periodic backups
+- Encrypting and securely storing backups
+- Handling failures with retry and fallback mechanisms
+- Enabling point-in-time recovery
+
+## Architecture
+The system is built using a distributed architecture:
+
+- **FastAPI**: Core API service for managing backup operations  
+- **PostgreSQL**: Primary database  
+- **MinIO (S3-compatible)**: Backup storage layer  
+- **Redis**: Message broker and caching  
+- **Celery Worker**: Asynchronous background task execution  
+- **Celery Beat**: Scheduled backup jobs  
+- **Prometheus + Grafana**: Monitoring and observability  
+
+## Key Features
+- Automated scheduled backups using Celery Beat  
+- Asynchronous backup processing via Celery workers  
+- Backup encryption using secure keys  
+- Failure handling with retry and fallback storage  
+- Point-in-time recovery capability  
+- Monitoring and metrics visualization using Prometheus and Grafana  
+
+## How It Works
+1. Celery Beat schedules periodic backup jobs  
+2. Worker processes execute database dumps asynchronously  
+3. Backups are encrypted and stored in MinIO (S3-compatible storage)  
+4. Failures trigger retry mechanisms or fallback storage  
+5. Metrics are collected and visualized for monitoring  
+
+## Tech Stack
+- Python (FastAPI)
+- PostgreSQL
+- Redis
+- Celery
+- Docker & Docker Compose
+- MinIO (S3-compatible storage)
+- Prometheus & Grafana
 
 ## Setup
 
-1. Clone the repository
-2. Copy `.env` and update the variables as needed
-3. Run `docker-compose up --build`
+1. Clone the repository  
+2. Copy `.env` and update variables  
+3. Run:
 
-## Environment Variables
-
-See `.env` file for all configurable variables.
-
-### Required for Backup Functionality
-- `BACKUP_ENCRYPTION_KEY`: Base64-encoded key for encrypting backups (generate with `openssl rand -base64 32`)
-- `MINIO_BUCKET_NAME`: Name of the MinIO bucket for storing backups (default: 'backups')
-
-## MinIO Bucket Setup
-
-The application automatically creates the MinIO bucket when the first backup is performed. However, if you want to create it manually:
-
-1. Access MinIO Console at `http://localhost:9003` (or your configured port)
-2. Login with your `MINIO_ACCESS_KEY` and `MINIO_SECRET_KEY`
-3. Click "Create Bucket" and enter the bucket name (default: 'backups')
-4. The bucket will be created automatically during the first backup if it doesn't exist
-
-## Volumes
-
-- `postgres_data`: PostgreSQL data
-- `minio_data`: MinIO data
-- `redis_data`: Redis data
-- `fallback_volume`: Fallback storage when S3 fails
-- `prometheus_data`: Prometheus data
-- `grafana_data`: Grafana data
-
-## Network
-
-All services are connected via `dbguardian_network`.
-
+```bash
+docker-compose up --build
